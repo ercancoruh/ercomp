@@ -22,6 +22,11 @@ def doctor_report() -> str:
         f"ffprobe  : {ffprobe_bin() or 'via ffmpeg -i'}",
         "bundle   : Pillow + imageio-ffmpeg (no setup needed)",
     ]
+    if proto.value == "blocks":
+        from ercomp.config import load_config
+
+        style = load_config().blocks_style
+        lines.append(f"blocks   : style={style} (braille≈4× denser than half)")
     if not ffmpeg_bin():
         lines.append("error    : ffmpeg missing — reinstall: pip install --force-reinstall ercomp")
     if proto.value == "blocks":

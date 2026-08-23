@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ercomp"
-version = "0.7.0"
+version = "0.8.0"
 description = "Terminal media player — batteries included (Pillow + bundled ffmpeg)."
 readme = "README.md"
 license = { text = "MIT" }

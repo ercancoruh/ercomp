@@ -15,6 +15,7 @@ except ImportError:  # py<3.11
 @dataclass
 class Config:
     protocol: str = "auto"  # auto|kitty|iterm|sixel|blocks
+    blocks_style: str = "braille"  # braille|quad|half — denser = sharper on Windows
     fps_cap_blocks: float = 15.0
     fps_cap_sixel: float = 12.0
     fps_cap_kitty: float = 30.0
@@ -66,6 +67,7 @@ def _default_toml() -> str:
     c = _DEFAULT
     return f"""# ercomp configuration
 protocol = "{c.protocol}"
+blocks_style = "{c.blocks_style}"  # braille (sharpest) | quad | half
 fps_cap_blocks = {c.fps_cap_blocks}
 fps_cap_sixel = {c.fps_cap_sixel}
 fps_cap_kitty = {c.fps_cap_kitty}

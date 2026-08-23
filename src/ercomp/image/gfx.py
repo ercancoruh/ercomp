@@ -137,13 +137,16 @@ def _sixel_python(img: Image.Image, *, fast: bool = False) -> str:
 
 
 def render_blocks(img: Image.Image, geo: TermGeometry, *, fast: bool = False) -> str:
-    from ercomp.image.render import fit_size, render_halfblocks
+    from ercomp.config import load_config
+    from ercomp.image.render import cell_size, fit_size, render_blocks_art
 
+    style = (load_config().blocks_style or "braille").lower()
     cols, rows = geo.usable_cells(reserve_rows=_RESERVE)
-    out_w, out_h = fit_size(img.width, img.height, cols, rows)
-    art = render_halfblocks(img, out_w, out_h, fast=fast)
+    out_w, out_h = fit_size(img.width, img.height, cols, rows, style=style)
+    art = render_blocks_art(img, out_w, out_h, style=style, fast=fast)
+    cw, ch = cell_size(style)
+    art_cols = max(1, out_w // cw)
     art_rows = art.count("\n") + 1 if art else 0
-    art_cols = out_w
     content_rows = rows
     top = HEADER_ROWS + max(0, (content_rows - art_rows) // 2)
     left = max(0, (cols - art_cols) // 2)

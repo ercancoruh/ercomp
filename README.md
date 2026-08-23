@@ -26,6 +26,8 @@ Pulls in **Pillow** + **bundled ffmpeg** (`imageio-ffmpeg`). Graphics protocols 
 
 Auto: **kitty → iterm → sixel → blocks**. Override: `--protocol` or config.
 
+On **blocks** (Windows Terminal etc.), default is **braille** (2×4 dots/cell, ~4× denser than classic ▀). Config: `blocks_style = "braille" | "quad" | "half"`.
+
 ## Dev
 
 ```bash
