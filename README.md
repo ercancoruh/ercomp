@@ -1,68 +1,57 @@
 # ercomp
 
-Terminal media player for images, animation, and video.
-**One `pip install` — nothing else to set up.**
+Terminal media **browser** — thumbnail grid in your current folder.
+Photos and videos open in **new windows**; the browser stays open.
 
 ```bash
 pip install ercomp
-ercomp photo.jpg
-ercomp clip.mp4
-ercomp ./folder/
+ercomp
 ```
 
-Includes **Pillow** and a **bundled ffmpeg** binary (`imageio-ffmpeg`).
-Frames are drawn with pure-Python **truecolor half-blocks** (▀) — exact 24-bit
-color, tuned for smooth playback. No chafa, no libsixel, no extra setup step.
+On Windows, `pip install` also tries to fetch a portable **mpv** build (GPU video).
+You can also run `ercomp setup-mpv` or `winget install shinchiro.mpv`.
 
-Requires a terminal with truecolor support (Windows Terminal, kitty, iTerm2,
-most modern terminals).
+## Controls (browser)
 
-## Features
+| Key | Action |
+|-----|--------|
+| Arrows | Move |
+| Enter | Open folder / open file in a new window |
+| Backspace / `h` | Parent folder |
+| `r` | Refresh |
+| `q` | Quit |
 
-| Feature | Controls |
-|---------|----------|
-| Zoom / pan | `+/-`, arrow keys, mouse wheel / drag |
-| Playlist | `n` / `p` · open a file or directory |
-| Video seek | `←` / `→`, digits then `g` or Enter |
-| Audio | `m` mute, `[` `]` volume |
-| Pause | Space |
-| Screenshot | `s` → PNG |
-| Quit | `q` / Esc |
-| Config | `ercomp init-config` → `~/.config/ercomp/config.toml` |
-| Diagnose | `ercomp doctor` |
+## Controls (photo / terminal video window)
 
-## Graphics
+| Key | Action |
+|-----|--------|
+| Backspace / `q` / Esc | Close window |
+| `+/-` | Zoom (photos) |
+| Arrows | Pan / seek |
 
-Photos, GIFs, and video all use the same **truecolor half-block** renderer:
-
-- Foreground = top pixel, background = bottom pixel (solid ▀)
-- SGR coalescing keeps frame output small for high FPS
-- Very large terminals (tiny fonts) are soft-capped so redraw stays real-time
-
-Resolution denser styles may come later; this release prioritizes **color and FPS**.
-
-## Config
+## Optional
 
 ```bash
+ercomp doctor
+ercomp setup-mpv
 ercomp init-config
 ```
 
-Example `~/.config/ercomp/config.toml`:
+## Config
+
+`~/.config/ercomp/config.toml`:
 
 ```toml
-fps_cap = 24.0
-seek_seconds = 5.0
-volume = 1.0
-mute = false
+video_backend = "auto"   # auto | terminal | mpv
+video_graphics = "blocks"
+cell_budget = 10000
 mouse = true
-screenshot_dir = ""
 ```
 
 ## Development
 
 ```bash
 pip install -e ".[dev]"
-ercomp doctor
 pytest -q
 ```
 

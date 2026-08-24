@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ercomp"
-version = "0.12.0"
-description = "Terminal media player for images and video — truecolor half-blocks, Pillow + bundled ffmpeg."
+version = "0.13.0"
+description = "Terminal media browser — thumbnail TUI for images and video (Pillow + bundled ffmpeg)."
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
@@ -57,3 +57,5 @@ where = ["src"]
 
 [tool.setuptools.package-dir]
 "" = "src"
+
+# Keep setup.py for post-install mpv fetch on Windows

@@ -15,7 +15,7 @@ from ercomp.image.gfx import render
 from ercomp.image.term import geometry, geometry_retain
 from ercomp.image.zoom import Viewport
 from ercomp.input import DISABLE_MOUSE, ENABLE_MOUSE, Event, TerminalInput
-from ercomp.kitty_font import KittyFontSession
+from ercomp.font_session import FontSession
 from ercomp.playlist import Nav
 
 if TYPE_CHECKING:
@@ -52,15 +52,18 @@ def _draw(
     status: str | None = None,
     interactive: bool = False,
 ) -> Image.Image:
+    from ercomp.image.chrome import FOOTER_ROWS, set_window_title
+
     frame = vp.frame(img, geo)
     zoom = status or vp.label()
     head = render_header(geo.cols, name=name, size_label=size_label)
-    foot = render_footer(geo.cols, mode="blocks", zoom_label=zoom)
-    # Only throttle quality during interactive zoom/pan — never for the initial still
-    fast = interactive
-    body = render(frame, geo, fast=fast)
+    foot = render_footer(geo.cols, mode="photo", zoom_label=zoom)
+    # Lanczos for final stills; BOX only while zooming/panning for responsiveness
+    body = render(frame, geo, fast=interactive)
+    foot_row = max(1, geo.rows - FOOTER_ROWS + 1)
+    _write(set_window_title(name))
     _write(_CLEAR + _HOME)
-    _write(f"{cup(1, 1)}{head}{cup(max(1, geo.rows), 1)}{foot}")
+    _write(f"{cup(1, 1)}{head}{cup(foot_row, 1)}{foot}")
     _write(body)
     sys.stdout.flush()
     return frame
@@ -151,12 +154,21 @@ def _event_loop(
                     interactive=True,
                 )
                 if pending is None:
+                    # Settle with Lanczos for final quality
+                    last_frame = _draw(
+                        img,
+                        geo,
+                        vp,
+                        name=name,
+                        size_label=size_label,
+                        interactive=False,
+                    )
                     continue
                 ev = pending
 
             if ev.kind == "key":
                 key = ev.key
-                if key in ("q", "Q", "\x03", "\x1b"):
+                if key in ("q", "Q", "\x03", "\x1b", "\b", "\x7f") or key == "backspace":
                     return Nav.QUIT
                 if key in ("n", "N"):
                     return Nav.NEXT
@@ -227,13 +239,13 @@ def view_fullscreen(
     Alternate-screen viewer. Returns Nav for playlist control.
     """
     cfg = cfg or load_config()
-    geo = geometry(probe=True)
     name = title or "image"
-    vp = Viewport()
-    vp.reset(img)
     use_mouse = bool(cfg.mouse)
 
     if not sys.stdout.isatty():
+        geo = geometry(probe=True)
+        vp = Viewport()
+        vp.reset(img)
         frame = vp.frame(img, geo)
         head = render_header(geo.cols, name=name, size_label=f"{img.width}×{img.height}")
         foot = render_footer(geo.cols, mode="blocks", zoom_label=vp.label())
@@ -247,10 +259,13 @@ def view_fullscreen(
         raise KeyboardInterrupt
 
     signal.signal(signal.SIGINT, _on_sigint)
-    font = KittyFontSession(cfg.kitty_font_delta)
+    font = FontSession(0.0)  # never shrink in dedicated viewer window — chrome stays readable
     result = Nav.QUIT
     try:
         font.start()
+        geo = geometry(probe=True)
+        vp = Viewport()
+        vp.reset(img)
         _write(_ENTER_ALT + _HIDE_CURSOR + _CLEAR + _HOME)
         if use_mouse:
             _write(ENABLE_MOUSE)

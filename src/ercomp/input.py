@@ -160,13 +160,24 @@ def _read_windows(timeout: float | None = None) -> Event | None:
     # Function / arrow keys: prefix \x00 or \xe0 then scan code
     if ch in ("\x00", "\xe0"):
         code = ord(msvcrt.getwch())
-        arrows = {72: "up", 80: "down", 75: "left", 77: "right"}
+        arrows = {
+            72: "up",
+            80: "down",
+            75: "left",
+            77: "right",
+            73: "pageup",
+            81: "pagedown",
+            71: "g",  # home → first
+            79: "G",  # end → last
+        }
         if code in arrows:
             return Event(kind="key", key=arrows[code])
         return Event(kind="unknown")
 
     if ch == "\r":
         return Event(kind="key", key="\n")
+    if ch == "\x08":
+        return Event(kind="key", key="\b")
     return Event(kind="key", key=ch)
 
 

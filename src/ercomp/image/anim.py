@@ -9,15 +9,15 @@ from pathlib import Path
 
 from PIL import Image, ImageSequence
 
-from ercomp.config import Config, load_config
+from ercomp.config import Config, load_config, video_use_sixel
 from ercomp.export import save_frame
-from ercomp.image.chrome import cup, render_footer, render_header
-from ercomp.image.gfx import render
+from ercomp.image.chrome import FOOTER_ROWS, cup, render_footer, render_header
+from ercomp.image.gfx import render_video
 from ercomp.image.loader import ImageOpenError
 from ercomp.image.term import geometry
+from ercomp.font_session import FontSession
 from ercomp.image.zoom import Viewport
 from ercomp.input import DISABLE_MOUSE, ENABLE_MOUSE, TerminalInput
-from ercomp.kitty_font import KittyFontSession
 from ercomp.playlist import Nav
 
 
@@ -64,28 +64,43 @@ def play_animated(
         delay = max(0.02, ms / 1000.0)
         frames.append((frame.copy().convert("RGBA"), delay))
 
-    geo = geometry(probe=True)
-    vp = Viewport()
-    vp.reset(frames[0][0])
     use_mouse = bool(cfg.mouse)
+    font = FontSession(0.0)
 
-    def draw(img: Image.Image, *, status: str) -> Image.Image:
+    use_sixel = video_use_sixel(cfg)
+
+    def draw(img: Image.Image, geo, vp: Viewport, *, status: str) -> Image.Image:
         fitted = vp.frame(img, geo)
         head = render_header(
             geo.cols,
             name=path.name,
             size_label=f"{src.width}×{src.height}  {src.n_frames}f",
         )
-        foot = render_footer(geo.cols, mode="blocks", zoom_label=status)
-        body = render(fitted, geo, fast=True)
+        mode = "sixel" if use_sixel else "anim"
+        foot = render_footer(geo.cols, mode=mode, zoom_label=status)
+        body = render_video(
+            fitted,
+            geo,
+            use_sixel=use_sixel,
+            budget=int(cfg.cell_budget),
+            sixel_colors=int(cfg.sixel_colors),
+            max_px=int(cfg.video_max_px),
+        )
+        foot_row = max(1, geo.rows - FOOTER_ROWS + 1)
         _write(_CLEAR + _HOME)
-        _write(f"{cup(1,1)}{head}{cup(max(1, geo.rows),1)}{foot}")
-        _write(body)
+        _write(f"{cup(1,1)}{head}{cup(foot_row,1)}{foot}")
+        if isinstance(body, bytes):
+            sys.stdout.buffer.write(body)
+        else:
+            sys.stdout.write(body)
         sys.stdout.flush()
         return fitted
 
     if not sys.stdout.isatty():
-        draw(frames[0][0], status="anim")
+        geo = geometry(probe=True)
+        vp = Viewport()
+        vp.reset(frames[0][0])
+        draw(frames[0][0], geo, vp, status="anim")
         return Nav.QUIT
 
     old_handler = signal.getsignal(signal.SIGINT)
@@ -94,7 +109,6 @@ def play_animated(
         raise KeyboardInterrupt
 
     signal.signal(signal.SIGINT, _on_sigint)
-    font = KittyFontSession(cfg.kitty_font_delta)
     paused = False
     idx = 0
     result = Nav.QUIT
@@ -102,13 +116,16 @@ def play_animated(
 
     try:
         font.start()
+        geo = geometry(probe=True)
+        vp = Viewport()
+        vp.reset(frames[0][0])
         _write(_ENTER_ALT + _HIDE_CURSOR + _CLEAR + _HOME)
         if use_mouse:
             _write(ENABLE_MOUSE)
         with TerminalInput() as tin:
             while True:
                 img, delay = frames[idx]
-                last_fitted = draw(img, status="pause" if paused else "anim")
+                last_fitted = draw(img, geo, vp, status="pause" if paused else "anim")
                 deadline = time.monotonic() + (0.1 if paused else delay)
                 while True:
                     remaining = deadline - time.monotonic()
@@ -120,7 +137,7 @@ def play_animated(
                     if ev.kind != "key":
                         continue
                     key = ev.key
-                    if key in ("q", "Q", "\x03", "\x1b"):
+                    if key in ("q", "Q", "\x03", "\x1b", "\b", "\x7f") or key == "backspace":
                         result = Nav.QUIT
                         return result
                     if key in ("n", "N"):
@@ -134,7 +151,7 @@ def play_animated(
                         break
                     if key in ("s", "S"):
                         sp = save_frame(last_fitted, cfg, stem=path.stem)
-                        draw(img, status=f"saved {sp.name}")
+                        draw(img, geo, vp, status=f"saved {sp.name}")
                         break
                 if not paused:
                     idx = (idx + 1) % len(frames)

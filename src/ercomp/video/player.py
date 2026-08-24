@@ -11,19 +11,23 @@ from pathlib import Path
 from PIL import Image
 
 from ercomp.audio import AudioPlayer
-from ercomp.config import Config, fps_cap_for, load_config
+from ercomp.config import Config, fps_cap_for, load_config, prefer_mpv, video_use_sixel
 from ercomp.export import save_frame
-from ercomp.image.chrome import FOOTER_ROWS, HEADER_ROWS, cup, render_footer, render_header
-from ercomp.image.gfx import render
+from ercomp.font_session import FontSession
+from ercomp.image.chrome import FOOTER_ROWS, HEADER_ROWS, cup, render_footer, render_header, set_window_title
+from ercomp.image.gfx import render, render_video
 from ercomp.image.term import geometry
 from ercomp.input import DISABLE_MOUSE, ENABLE_MOUSE, TerminalInput
-from ercomp.kitty_font import KittyFontSession
 from ercomp.playlist import Nav
 from ercomp.video.decode import open_rgb_pipe, probe
+from ercomp.video.external import play_with_mpv
 
 
-def _write(s: str) -> None:
-    sys.stdout.write(s)
+def _write(s: str | bytes) -> None:
+    if isinstance(s, bytes):
+        sys.stdout.buffer.write(s)
+    else:
+        sys.stdout.write(s)
     sys.stdout.flush()
 
 
@@ -50,22 +54,46 @@ def _fmt_time(seconds: float | None) -> str:
 
 def video_info(path: Path) -> str:
     info = probe(path)
+    cfg = load_config()
+    if prefer_mpv(cfg):
+        gfx = "mpv (external)"
+    elif video_use_sixel(cfg):
+        gfx = "sixel"
+    else:
+        gfx = "half-blocks"
     return (
         f"{path.name}\n"
         f"  size     : {info.size_label}\n"
         f"  fps      : {info.fps:.3g}\n"
         f"  duration : {_fmt_time(info.duration)}\n"
         f"  path     : {path.resolve()}\n"
-        f"  graphics : truecolor half-blocks\n"
+        f"  graphics : {gfx}\n"
         f"  audio    : {'on' if AudioPlayer.available() else 'none'}"
     )
 
 
-def _target_pixels(geo) -> tuple[int, int]:
-    from ercomp.image.half import budget_cells
+def _target_pixels(geo, *, use_sixel: bool, budget: int, max_px: int) -> tuple[int, int]:
+    """Decode size: terminal pixels for sixel, sample grid for budgeted blocks."""
+    if use_sixel:
+        max_w, max_h = geo.usable_pixels(reserve_rows=HEADER_ROWS + FOOTER_ROWS)
+        if max_px and max_px > 0:
+            long_edge = max(max_w, max_h)
+            if long_edge > max_px:
+                s = max_px / long_edge
+                max_w = max(2, int(max_w * s))
+                max_h = max(2, int(max_h * s))
+        # Even height for RGB pipe; sixel encoder will trim to multiple of 6
+        h = max_h - (max_h % 2)
+        return max(2, max_w), max(2, h)
+
+    import math
 
     cols, rows = geo.usable_cells(reserve_rows=HEADER_ROWS + FOOTER_ROWS)
-    cols, rows = budget_cells(cols, rows)
+    n = max(1, cols * rows)
+    budget = max(1000, int(budget))
+    if n > budget:
+        scale = max(1, int(math.ceil(math.sqrt(n / budget))))
+        cols, rows = max(2, cols // scale), max(2, rows // scale)
     w, h = cols, rows * 2
     h -= h % 2
     return max(2, w), max(2, h)
@@ -78,18 +106,43 @@ def play_video(
 ) -> Nav:
     """Play video. Returns Nav for playlist. space pause, arrows seek, m mute, s shot, n/p."""
     cfg = cfg or load_config()
-    info = probe(path)
-    geo = geometry(probe=True)
-    view_w, view_h = _target_pixels(geo)
-    cap = fps_cap_for(cfg)
-    play_fps = min(info.fps, cap) if cap else info.fps
-    frame_dt = 1.0 / max(play_fps, 1.0)
-    seek_step = float(cfg.seek_seconds)
 
+    # Prefer GPU player when available — terminal half-blocks cannot match real video FPS.
+    if prefer_mpv(cfg):
+        result = play_with_mpv(path, volume=float(cfg.volume), mute=bool(cfg.mute))
+        if result is not None:
+            return result
+
+    info = probe(path)
     volume = float(cfg.volume)
     mute = bool(cfg.mute)
     audio = AudioPlayer()
     use_mouse = bool(cfg.mouse)
+    seek_step = float(cfg.seek_seconds)
+    cap = fps_cap_for(cfg)
+    play_fps = min(info.fps, cap) if cap else info.fps
+    frame_dt = 1.0 / max(play_fps, 1.0)
+
+    want_sixel = video_use_sixel(cfg)
+    # Video: do not shrink font by default (1 pt explodes cells → WT can't keep up).
+    # Optional video_font_size > 0 still allowed; sixel can opt-in enable flag.
+    font = FontSession(0.0, enable_sixel=want_sixel)
+    if sys.stdout.isatty():
+        font.start()
+        from ercomp.image.cap import clear_cap_cache
+        from ercomp.image.term import clear_geometry_cache
+
+        clear_cap_cache()
+        clear_geometry_cache()
+
+    use_sixel = want_sixel
+    geo = geometry(probe=True)
+    view_w, view_h = _target_pixels(
+        geo,
+        use_sixel=use_sixel,
+        budget=int(cfg.cell_budget),
+        max_px=int(cfg.video_max_px),
+    )
 
     position = 0.0
     paused = False
@@ -125,7 +178,7 @@ def play_video(
         if raw and len(raw) == frame_bytes:
             img = Image.frombytes("RGB", (fw, fh), raw)
             head = render_header(geo.cols, name=path.name, size_label=info.size_label)
-            foot = render_footer(geo.cols, mode="blocks", zoom_label="video")
+            foot = render_footer(geo.cols, mode=("sixel" if use_sixel else "blocks"), zoom_label="video")
             _write(f"{cup(1,1)}{head}\n{render(img, geo, fast=True)}\n{foot}\n")
         return Nav.QUIT
 
@@ -135,31 +188,50 @@ def play_video(
         vol = "mute" if mute else f"vol {volume:.1f}"
         size_label = f"{info.size_label}  {tlabel}/{total}  {vol}"
         head = render_header(geo.cols, name=path.name, size_label=size_label)
-        foot = render_footer(geo.cols, mode="blocks", zoom_label=st)
+        gfx = "sixel" if use_sixel else "blocks"
+        foot = render_footer(geo.cols, mode=gfx, zoom_label=st)
         return head, foot
 
-    def _encode_frame(img: Image.Image) -> str:
-        return render(img, geo, fast=True)
+    def _encode_frame(img: Image.Image) -> bytes:
+        return render_video(
+            img,
+            geo,
+            use_sixel=use_sixel,
+            budget=int(cfg.cell_budget),
+            sixel_colors=int(cfg.sixel_colors),
+            max_px=int(cfg.video_max_px),
+        )
 
-    def _present(body: str, *, st: str, full: bool = False) -> None:
+    def _present(body: str | bytes, *, st: str, full: bool = False) -> None:
         nonlocal chrome_dirty, last_header_sec
         sec = int(position)
         need_chrome = full or chrome_dirty or sec != last_header_sec
+        if isinstance(body, str):
+            body_b = body.encode("utf-8")
+        else:
+            body_b = body
         if full or chrome_dirty:
             head, foot = _chrome(st)
-            _write(_CLEAR + _HOME)
-            _write(f"{cup(1, 1)}{head}{cup(max(1, geo.rows), 1)}{foot}")
-            _write(body)
+            foot_row = max(1, geo.rows - FOOTER_ROWS + 1)
+            sys.stdout.buffer.write((_CLEAR + _HOME).encode("ascii"))
+            sys.stdout.buffer.write(set_window_title(path.name).encode("utf-8"))
+            sys.stdout.buffer.write(
+                f"{cup(1, 1)}{head}{cup(foot_row, 1)}{foot}".encode("utf-8")
+            )
+            sys.stdout.buffer.write(body_b)
             chrome_dirty = False
             last_header_sec = sec
         elif need_chrome:
             head, foot = _chrome(st)
-            _write(f"{cup(1, 1)}{head}{cup(max(1, geo.rows), 1)}{foot}")
-            _write(body)
+            foot_row = max(1, geo.rows - FOOTER_ROWS + 1)
+            sys.stdout.buffer.write(
+                f"{cup(1, 1)}{head}{cup(foot_row, 1)}{foot}".encode("utf-8")
+            )
+            sys.stdout.buffer.write(body_b)
             last_header_sec = sec
         else:
-            _write(body)
-        sys.stdout.flush()
+            sys.stdout.buffer.write(body_b)
+        sys.stdout.buffer.flush()
 
     def restart_at(at: float) -> None:
         nonlocal proc, fw, fh, frame_bytes, position, next_deadline, chrome_dirty
@@ -178,19 +250,17 @@ def play_video(
         raise KeyboardInterrupt
 
     signal.signal(signal.SIGINT, _on_sigint)
-    font = KittyFontSession(cfg.kitty_font_delta)
     result = Nav.QUIT
     next_deadline = time.monotonic()
     digit_buf = ""
 
     try:
-        font.start()
         _write(_ENTER_ALT + _HIDE_CURSOR + _CLEAR + _HOME)
         if use_mouse:
             _write(ENABLE_MOUSE)
 
         with TerminalInput() as tin, ThreadPoolExecutor(max_workers=1) as pool:
-            pending: Future[str] | None = None
+            pending: Future[bytes] | None = None
 
             while True:
                 if not paused:
@@ -235,7 +305,7 @@ def play_video(
 
                     if ev.kind == "key":
                         key = ev.key
-                        if key in ("q", "Q", "\x03", "\x1b"):
+                        if key in ("q", "Q", "\x03", "\x1b", "\b", "\x7f") or key == "backspace":
                             result = Nav.QUIT
                             return result
                         if key in ("n", "N"):
@@ -364,7 +434,7 @@ def play_video(
                     if ev is None:
                         continue
                     if ev.kind == "key":
-                        if ev.key in ("q", "Q", "\x03", "\x1b"):
+                        if ev.key in ("q", "Q", "\x03", "\x1b", "\b", "\x7f") or ev.key == "backspace":
                             result = Nav.QUIT
                             break
                         if ev.key in ("n", "N"):

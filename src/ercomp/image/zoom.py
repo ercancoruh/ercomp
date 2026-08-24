@@ -16,6 +16,17 @@ _ZOOM_STEP = 1.25
 _PAN_FRAC = 0.20
 
 
+def _view_samples(geo: TermGeometry) -> tuple[int, int]:
+    """
+    Half-block sample grid for the content area (matches gfx.render_blocks).
+
+    One cell = 1×2 samples (▀). Must not use pixel cell metrics — those drift
+    after font shrink and made zoomed frames undersized.
+    """
+    cols, rows = geo.usable_cells(reserve_rows=_RESERVE)
+    return max(2, cols), max(2, rows * 2)
+
+
 @dataclass
 class Viewport:
     """Zoom >= 1; pan is the crop center in source-image pixels."""
@@ -44,26 +55,26 @@ class Viewport:
         self._clamp(img, crop_w, crop_h)
 
     def _crop_size(self, img: Image.Image, geo: TermGeometry) -> tuple[float, float]:
-        view_w, view_h = geo.usable_pixels(reserve_rows=_RESERVE)
+        view_w, view_h = _view_samples(geo)
         fit = min(view_w / img.width, view_h / img.height)
         scale = fit * self.zoom
-        crop_w = min(float(img.width), view_w / scale)
-        crop_h = min(float(img.height), view_h / scale)
+        crop_w = min(float(img.width), view_w / max(scale, 1e-9))
+        crop_h = min(float(img.height), view_h / max(scale, 1e-9))
         return crop_w, crop_h
 
     def _clamp(self, img: Image.Image, crop_w: float, crop_h: float) -> None:
         half_w, half_h = crop_w / 2, crop_h / 2
-        self.cx = min(max(self.cx, half_w), img.width - half_w)
-        self.cy = min(max(self.cy, half_h), img.height - half_h)
+        self.cx = min(max(self.cx, half_w), max(half_w, img.width - half_w))
+        self.cy = min(max(self.cy, half_h), max(half_h, img.height - half_h))
 
     def frame(self, img: Image.Image, geo: TermGeometry) -> Image.Image:
         """
-        Crop visible region from source, scale once to display size.
+        Crop visible region from source, scale once to the half-block sample grid.
 
-        Zoom still improves detail (smaller crop → less downscale). Uses BOX
-        for speed on interactive redraws.
+        Zoom improves detail (smaller crop → less downscale / more upscale).
+        Output always fills the terminal content area (same as unzoomed fit).
         """
-        view_w, view_h = geo.usable_pixels(reserve_rows=_RESERVE)
+        view_w, view_h = _view_samples(geo)
         crop_w, crop_h = self._crop_size(img, geo)
         self._clamp(img, crop_w, crop_h)
 
@@ -81,9 +92,9 @@ class Viewport:
             cropped = img.crop((left, top, right, bottom))
 
         tw, th = fit_pixels(cropped.width, cropped.height, view_w, view_h)
+        # Prefer filling the view: allow slight stretch only via fit_pixels aspect
         if (tw, th) == cropped.size:
             return cropped
-        # BOX is much faster than Lanczos/Bilinear for downscale
         if tw < cropped.width or th < cropped.height:
             resample = Image.Resampling.BOX
         else:

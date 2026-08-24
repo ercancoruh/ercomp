@@ -33,6 +33,10 @@ class TermGeometry:
     def usable_pixels(self, reserve_rows: int = 0) -> tuple[int, int]:
         """Max drawable pixel area after reserving rows (e.g. header/footer)."""
         rows = max(1, self.rows - reserve_rows)
+        if self.px_width and self.px_height and self.rows > 0:
+            # Prefer window pixels directly (avoids cell_px integer truncation)
+            h = max(1, int(self.px_height * rows / self.rows))
+            return max(1, int(self.px_width)), h
         cw, ch = self.cell_px
         return max(1, self.cols * cw), max(1, rows * ch)
 

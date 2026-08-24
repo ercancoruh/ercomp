@@ -1,3 +1,3 @@
-"""ercomp — terminal media player (images, animation, video)."""
+"""ercomp — terminal media browser (images, animation, video)."""
 
-__version__ = "0.12.0"
+__version__ = "0.13.0"

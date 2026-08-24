@@ -29,6 +29,17 @@ def is_media(path: Path) -> bool:
     return bool(mime and (mime.startswith("image/") or mime.startswith("video/")))
 
 
+def dir_has_media(path: Path) -> bool:
+    """True if directory directly contains at least one media file (non-recursive)."""
+    try:
+        for p in path.iterdir():
+            if is_media(p):
+                return True
+    except OSError:
+        return False
+    return False
+
+
 def build_playlist(path: Path) -> list[Path]:
     """
     File → playlist of sibling media in the same directory (sorted),
