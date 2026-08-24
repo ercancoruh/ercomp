@@ -13,7 +13,7 @@ _RESERVE = HEADER_ROWS + FOOTER_ROWS
 _ZOOM_MIN = 1.0
 _ZOOM_MAX = 32.0
 _ZOOM_STEP = 1.25
-_PAN_FRAC = 0.20  # move 20% of visible crop per arrow key
+_PAN_FRAC = 0.20
 
 
 @dataclass
@@ -47,7 +47,6 @@ class Viewport:
         view_w, view_h = geo.usable_pixels(reserve_rows=_RESERVE)
         fit = min(view_w / img.width, view_h / img.height)
         scale = fit * self.zoom
-        # Visible region in source pixels
         crop_w = min(float(img.width), view_w / scale)
         crop_h = min(float(img.height), view_h / scale)
         return crop_w, crop_h
@@ -59,10 +58,10 @@ class Viewport:
 
     def frame(self, img: Image.Image, geo: TermGeometry) -> Image.Image:
         """
-        Crop + scale for the current zoom/pan.
+        Crop visible region from source, scale once to display size.
 
-        At zoom=1 this matches fit-to-content. At zoom>1 the crop is
-        enlarged to the content pixel size (all protocols re-rasterize).
+        Zoom still improves detail (smaller crop → less downscale). Uses BOX
+        for speed on interactive redraws.
         """
         view_w, view_h = geo.usable_pixels(reserve_rows=_RESERVE)
         crop_w, crop_h = self._crop_size(img, geo)
@@ -84,7 +83,12 @@ class Viewport:
         tw, th = fit_pixels(cropped.width, cropped.height, view_w, view_h)
         if (tw, th) == cropped.size:
             return cropped
-        return cropped.resize((tw, th), resample=Image.Resampling.LANCZOS)
+        # BOX is much faster than Lanczos/Bilinear for downscale
+        if tw < cropped.width or th < cropped.height:
+            resample = Image.Resampling.BOX
+        else:
+            resample = Image.Resampling.BILINEAR
+        return cropped.resize((tw, th), resample=resample)
 
     def label(self) -> str:
         if self.zoom <= 1.0 + 1e-6:

@@ -5,7 +5,7 @@ from __future__ import annotations
 from enum import Enum
 from pathlib import Path
 
-from ercomp.detect import IMAGE_EXTENSIONS, VIDEO_EXTENSIONS, detect_kind, MediaKind
+from ercomp.detect import IMAGE_EXTENSIONS, VIDEO_EXTENSIONS
 
 
 class Nav(Enum):
@@ -22,8 +22,11 @@ def is_media(path: Path) -> bool:
     ext = path.suffix.lower()
     if ext in IMAGE_EXTENSIONS or ext in VIDEO_EXTENSIONS:
         return True
-    kind = detect_kind(path)
-    return kind in (MediaKind.IMAGE, MediaKind.VIDEO)
+    # Magic bytes only — do not ffprobe random files (slow / false positives)
+    from ercomp.detect import sniff_mime
+
+    mime = sniff_mime(path)
+    return bool(mime and (mime.startswith("image/") or mime.startswith("video/")))
 
 
 def build_playlist(path: Path) -> list[Path]:

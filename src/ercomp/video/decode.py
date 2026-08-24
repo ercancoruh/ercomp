@@ -175,6 +175,10 @@ def open_rgb_pipe(
         "-hide_banner",
         "-loglevel",
         "error",
+        "-fflags",
+        "nobuffer",
+        "-flags",
+        "low_delay",
         "-hwaccel",
         "auto",
     ]
@@ -199,7 +203,7 @@ def open_rgb_pipe(
             cmd,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
-            bufsize=fw * fh * 3 * 2,
+            bufsize=max(fw * fh * 3 * 4, 1 << 16),
         )
     except OSError as e:
         raise VideoError(f"ffmpeg failed: {e}") from e

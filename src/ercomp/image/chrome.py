@@ -56,9 +56,9 @@ def render_header(cols: int, *, name: str, size_label: str) -> str:
     )
 
 
-def render_footer(cols: int, *, protocol: str, zoom_label: str = "fit") -> str:
+def render_footer(cols: int, *, mode: str = "blocks", zoom_label: str = "fit") -> str:
     cols = max(8, cols)
-    left = f" {protocol} · {zoom_label} "
+    left = f" {mode} · {zoom_label} "
     zl = zoom_label
     if zl.startswith("saved"):
         right = " s shot  q quit "

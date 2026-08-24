@@ -3,29 +3,24 @@
 from __future__ import annotations
 
 import os
-from dataclasses import asdict, dataclass, fields
+from dataclasses import dataclass, fields
 from pathlib import Path
 
 try:
     import tomllib
-except ImportError:  # py<3.11
+except ImportError:  # Python < 3.11
     tomllib = None  # type: ignore[assignment]
 
 
 @dataclass
 class Config:
-    protocol: str = "auto"  # auto|kitty|iterm|sixel|blocks
-    blocks_style: str = "braille"  # braille|quad|half — denser = sharper on Windows
-    fps_cap_blocks: float = 15.0
-    fps_cap_sixel: float = 12.0
-    fps_cap_kitty: float = 30.0
-    fps_cap_iterm: float = 24.0
+    fps_cap: float = 24.0
     seek_seconds: float = 5.0
     volume: float = 1.0  # 0..2
     mute: bool = False
-    kitty_font_delta: float = -2.0  # relative size change while viewing; 0=off
+    kitty_font_delta: float = 0.0  # Kitty only: relative font size while viewing; 0 = off
     mouse: bool = True
-    screenshot_dir: str = ""  # empty → cwd
+    screenshot_dir: str = ""  # empty → current working directory
 
 
 _DEFAULT = Config()
@@ -47,6 +42,9 @@ def load_config() -> Config:
     except (OSError, ValueError):
         return cfg
     known = {f.name for f in fields(Config)}
+    # Legacy keys from older configs
+    if "fps_cap_blocks" in data and "fps_cap" not in data:
+        data["fps_cap"] = data["fps_cap_blocks"]
     for k, v in data.items():
         if k in known:
             setattr(cfg, k, v)
@@ -66,12 +64,8 @@ def save_default_config() -> Path:
 def _default_toml() -> str:
     c = _DEFAULT
     return f"""# ercomp configuration
-protocol = "{c.protocol}"
-blocks_style = "{c.blocks_style}"  # braille (sharpest) | quad | half
-fps_cap_blocks = {c.fps_cap_blocks}
-fps_cap_sixel = {c.fps_cap_sixel}
-fps_cap_kitty = {c.fps_cap_kitty}
-fps_cap_iterm = {c.fps_cap_iterm}
+# Graphics: truecolor half-blocks only (best color + FPS)
+fps_cap = {c.fps_cap}
 seek_seconds = {c.seek_seconds}
 volume = {c.volume}
 mute = {"true" if c.mute else "false"}
@@ -81,10 +75,7 @@ screenshot_dir = "{c.screenshot_dir}"
 """
 
 
-def fps_cap_for(protocol: str, cfg: Config) -> float | None:
-    return {
-        "blocks": cfg.fps_cap_blocks,
-        "sixel": cfg.fps_cap_sixel,
-        "kitty": cfg.fps_cap_kitty,
-        "iterm": cfg.fps_cap_iterm,
-    }.get(protocol)
+def fps_cap_for(cfg: Config | None = None) -> float | None:
+    """Return the playback FPS cap, or None if uncapped."""
+    cfg = cfg or load_config()
+    return float(cfg.fps_cap) if cfg.fps_cap else None

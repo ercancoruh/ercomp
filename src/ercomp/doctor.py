@@ -5,32 +5,26 @@ from __future__ import annotations
 import os
 import sys
 
-from ercomp.image.term import detect_protocol, geometry
+from ercomp.image.term import geometry
 from ercomp.tools import ffmpeg_bin, ffmpeg_source, ffprobe_bin
 
 
 def doctor_report() -> str:
-    geo = geometry()
-    proto = detect_protocol()
+    geo = geometry(probe=True)
     px = f"{geo.px_width}x{geo.px_height}" if geo.px_width else "?"
+    cw, ch = geo.cell_px
     lines = [
-        f"protocol : {proto.value}",
-        f"term     : {geo.cols}x{geo.rows} cells, {px} px",
+        "graphics : truecolor half-blocks",
+        f"term     : {geo.cols}x{geo.rows} cells, {px} px, cell {cw}x{ch}",
         f"TERM     : {os.environ.get('TERM', '')}",
+        f"WT       : {'yes' if os.environ.get('WT_SESSION') else 'no'}",
         f"tty      : {sys.stdout.isatty()}",
         f"ffmpeg   : {ffmpeg_source()}",
         f"ffprobe  : {ffprobe_bin() or 'via ffmpeg -i'}",
         "bundle   : Pillow + imageio-ffmpeg (no setup needed)",
     ]
-    if proto.value == "blocks":
-        from ercomp.config import load_config
-
-        style = load_config().blocks_style
-        lines.append(f"blocks   : style={style} (braille≈4× denser than half)")
     if not ffmpeg_bin():
         lines.append("error    : ffmpeg missing — reinstall: pip install --force-reinstall ercomp")
-    if proto.value == "blocks":
-        lines.append("hint     : Kitty/WezTerm/Ghostty (or SSH) for pixel graphics")
     return "\n".join(lines)
 
 
